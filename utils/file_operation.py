@@ -15,10 +15,11 @@ from relevance_info import Relevance
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s : %(levelname)s : %(message)s')
 
+
 ########################### evaluation oriented #######################
 def write_result_to_trec_format(result_dict, write_path, docnolist_file):
 
-  docnolist = parse_corpus(docnolist_file)
+  docno_map = docid2docno(docnolist_file)  # parse_corpus(docnolist_file)
   f = open(write_path, 'w')
   for qid, result in result_dict.items():
 
@@ -26,7 +27,7 @@ def write_result_to_trec_format(result_dict, write_path, docnolist_file):
     score_list = result.get_score_list()
     rank = 0
     for docid, score in zip(docid_list, score_list):
-      f.write("{0}\tQ0\t{1}\t{2}\t{3}\t{4}\n".format(qid, docnolist[docid], rank, score, result.get_runid()))
+      f.write("{0}\tQ0\t{1}\t{2}\t{3}\t{4}\n".format(qid, docno_map[docid], rank, score, result.get_runid()))
       rank += 1
 
   f.close()
@@ -79,16 +80,44 @@ def docno2docid(docno_file, increment=0):
   return docno_map
 
 
+def docid2docno(docno_file, increment=0):
+  docid_map = {}
+  docid = increment
+  with open(docno_file, 'r') as f:
+    for line in f:
+      docid_map.update({docid: line.strip()})
+      docid += 1
+
+  return docid_map
+
+
+def read_word_dict(filename):
+    word_dict = {}
+    iword_dict = {}
+    for line in open(filename):
+        line = line.strip().split()
+        word_dict[line[1]] = line[0]
+        iword_dict[line[0]] = line[1]
+    print('[%s]\n\tWord dict size: %d\n' % (filename, len(word_dict)))
+    return word_dict, iword_dict
+
+
 def parse_topic(topic_file):
   query_dict = {}
+  word_dict_file = "/home/fernando/NPRF/data/word_dict.v2.txt"
+  word_dict, _ = read_word_dict(word_dict_file)
+
   with open(topic_file, 'r') as f:
     for line in f:  # .readlines():
       tokens = line.strip().split()
       qid = tokens[0].strip()
-      q_terms = tokens[1:]
+      # q_terms = tokens[1:]
+      q_terms = tokens[2:]
+      q_terms = [word_dict[token] for token in q_terms if token in word_dict]
       query_dict.update({int(qid): q_terms})
 
   return query_dict
+
 
 def parse_stoplist(stop_file):
   stoplist = []
@@ -100,13 +129,17 @@ def parse_stoplist(stop_file):
 
   return stoplist
 
+
 def df_map_from_file(df_file):
   df_map = {}
   with open(df_file, 'r') as f:
     for line in f:
-      tokens = line.strip().split('\t')
-      term, df, cf = tokens[0], int(tokens[1]), int(tokens[2])
-      if df_map.has_key(term): # this is due to that two terms maybe the same after Krovetz stemming
+      # tokens = line.strip().split('\t')
+      # term, df, cf = tokens[0], int(tokens[1]), int(tokens[2])
+
+      tokens = line.strip().split()
+      term, cf, df = tokens[0], int(tokens[1]), int(tokens[2])
+      if term in df_map:  # this is due to that two terms maybe the same after Krovetz stemming
         df_map[term] += df
       else:
         df_map.update({term: df})
@@ -138,16 +171,26 @@ def parse_topk_content(content):
     docno, doclen, terms = content.strip().split('\t')
     terms = terms.split()
     return terms
-  except ValueError, e:
+  except ValueError as e:
     print(e)
     print(content)
     return []
 
+
 def parse_corpus(corpus_file):
+  word_dict_file = "/home/fernando/NPRF/data/word_dict.v2.txt"
+  word_dict, _ = read_word_dict(word_dict_file)
+  # docno_map = docno2docid("/home/fernando/NPRF/data/robust04_dids.txt")
   corpus = []
+  index = 0
   with open(corpus_file, 'r') as f:
     for line in f:
-      corpus.append(line.strip())
+      # corpus.append(line.strip())
+      line = line.strip().split()
+      terms = line[2:]
+      terms = [word_dict[term] for term in terms if term in word_dict]
+      corpus.append(terms)
+      index += 1
 
   return corpus
 
@@ -166,7 +209,7 @@ def make_directory(path1, path2):
   if not os.path.exists(dir):
     try:
       os.mkdir(dir)
-    except OSError, e:
+    except OSError as e:
       print(e)
       time.sleep(10)
 

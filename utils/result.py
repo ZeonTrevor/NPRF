@@ -42,5 +42,3 @@ class Result(object):
     self.set_docid_list(docid_list)
     self.set_score_list(score_list)
     self.update_ranking()
-
-    

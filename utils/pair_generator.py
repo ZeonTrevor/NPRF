@@ -10,8 +10,10 @@ sys.path.append('../utils')
 
 from relevance_info import Relevance
 
+
 class PairGenerator(object):
-  '''Generator used for neg/pos pair generation, follow the interleaved format
+  """
+  Generator used for neg/pos pair generation, follow the interleaved format
 
   Attributes:
       relevance_dict_path: path to the whole relevance information
@@ -20,7 +22,8 @@ class PairGenerator(object):
       sample_perquery_limit: limit on each query
       sample_total_limit: limit on one epoch
 
-  '''
+  """
+
   def __init__(self, relevance_dict_path, batch_size, shuffle, sample_perquery_limit, sample_total_limit):
 
     self.batch_size = batch_size
@@ -31,9 +34,8 @@ class PairGenerator(object):
     with open(relevance_dict_path, 'r') as f:
       self.relevance_dict = pickle.load(f)
 
-
   def generate_pair_batch(self, qid_list, sample_size):
-    '''
+    """
 
     Args:
       qid_list: the training qid list
@@ -41,24 +43,22 @@ class PairGenerator(object):
 
     Returns:
       A generator that yield (feature, label) pairs.
-    '''
+    """
     pass
 
-
   def get_feature_batch(self, triplet_list):
-    '''
+    """
 
     Args:
       triplet_list: list of (qid, neg_docid, pos_docid) triplets
 
     Returns:
       feature for current batch
-    '''
+    """
     pass
 
-
   def generate_list_batch(self, qid_list, topk):
-    '''
+    """
 
     Args:
       qid_list: the validation/test qid list
@@ -66,14 +66,13 @@ class PairGenerator(object):
 
     Returns:
       features, plus the length indicator.
-    '''
+    """
     pass
 
-
   def get_triplet_list(self, qid_list, sample_size=10):
-    '''Deprecated, please use get_triplet_list_balanced
+    """Deprecated, please use get_triplet_list_balanced
 
-    '''
+    """
     triplet_list_global = []
     for qid in qid_list:
       relevance = self.relevance_dict.get(qid)
@@ -95,10 +94,8 @@ class PairGenerator(object):
 
     return triplet_list_global
 
-
-
   def get_triplet_list_balanced(self, qid_list, sample_size):
-    '''
+    """
 
     Args:
       qid_list:
@@ -106,9 +103,13 @@ class PairGenerator(object):
 
     Returns:
 
-    '''
+    """
     triplet_list_global = []
     for qid in qid_list:
+      if qid == 348:
+        logging.info("Skipping qid:{0} because of bm25 relevant docs less than pseudo-rel docs".format(qid))
+        continue
+
       relevance = self.relevance_dict.get(qid)
       relevance_posting = relevance.get_judged_docid_list()
       pos_list = []
@@ -123,8 +124,8 @@ class PairGenerator(object):
         curr_negative_docid_list = []
         for j in range(i - 1, -1, -1):
           curr_negative_docid_list.extend(relevance_posting[j])
-        pair_list =  self.create_triplet_list(curr_negative_docid_list, curr_positive_docid_list, qid, curr_sample_size)
-        if pair_list != None:
+        pair_list = self.create_triplet_list(curr_negative_docid_list, curr_positive_docid_list, qid, curr_sample_size)
+        if pair_list is not None:
           curr_triplet_list.extend(pair_list)
       curr_triplet_list = np.random.permutation(curr_triplet_list)[: curr_perquery_limit]
       triplet_list_global.extend(curr_triplet_list)
@@ -132,9 +133,8 @@ class PairGenerator(object):
     logging.info("Generate totally {0} pairs".format(len(triplet_list_global)))
     return triplet_list_global
 
-
   def create_triplet_list(self, neg_docid_list, pos_docid_list, qid, sample_size):
-    '''create triplet list from negative docid list and positive docid list
+    """create triplet list from negative docid list and positive docid list
 
         Strategy: for each docid in pos_docid_list, sample negative docids from neg_docid_list
         with the given sample size.
@@ -147,7 +147,7 @@ class PairGenerator(object):
 
     Returns:
 
-    '''
+    """
     sample_size = min(len(neg_docid_list), sample_size)
     if sample_size == 0:
       return
@@ -157,10 +157,10 @@ class PairGenerator(object):
       pos_sample_list = [pos_docid] * sample_size
       triplet_list.extend(zip([qid] * sample_size, neg_sample_list, pos_sample_list))
 
-    return  triplet_list
+    return triplet_list
 
   def count_pairs(self, qid_list, sample_size):
-    '''Deprecated,  please use func count_pairs_balanced
+    """Deprecated,  please use func count_pairs_balanced
 
     Args:
       qid_list:
@@ -168,7 +168,7 @@ class PairGenerator(object):
 
     Returns:
 
-    '''
+    """
     def count_on_topic(neg_len, pos_len, sample_size):
       sample_size = min(neg_len, sample_size)
       if sample_size == 0:
@@ -191,7 +191,7 @@ class PairGenerator(object):
     return total
 
   def count_pairs_balanced(self, qid_list, sample_size):
-    '''Count the number of total pair created in each epoch, which could be used as a keras function parameter
+    """Count the number of total pair created in each epoch, which could be used as a keras function parameter
 
     Args:
       qid_list:
@@ -199,7 +199,7 @@ class PairGenerator(object):
 
     Returns:
 
-    '''
+    """
     def count_on_topic(neg_len, pos_len, sample_size):
       sample_size = min(neg_len, sample_size)
       if sample_size == 0:
@@ -230,11 +230,11 @@ class PairGenerator(object):
     return total
 
   def count_percentile(self):
-    ''' cut number of into percetiles, sample size of query that has more positive documents will be cut
+    """ cut number of into percetiles, sample size of query that has more positive documents will be cut
 
     Returns:
 
-    '''
+    """
     num_pos_list = []
     for qid, relevance in self.relevance_dict.items():
       judged_docid_list = relevance.get_judged_docid_list()
@@ -247,7 +247,7 @@ class PairGenerator(object):
     return [num_pos_list[len(num_pos_list) * i / 4] for i in range(1, 4)]
 
   def _decide_sample(self, sample_size, num_of_positive):
-    '''
+    """
 
     Args:
       sample_size:
@@ -255,7 +255,7 @@ class PairGenerator(object):
 
     Returns:
       modified sample size.
-    '''
+    """
     percentile_14, percentile_24, percentile_34 = self.count_percentile()
     curr_sample_size, curr_perquery_limit = sample_size, self.sample_perquery_limit
     if num_of_positive < percentile_14:
