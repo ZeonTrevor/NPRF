@@ -1,16 +1,20 @@
+from comet_ml import Experiment
 
 import os
 import logging
 import tensorflow as tf
 import sys
+import math
 sys.path.append('../utils/')
 sys.path.append('../metrics/')
 
 from file_operation import retain_file, load_pickle
 from keras.callbacks import Callback
+from keras import backend as K
 from collections import deque
 
 from rank_losses import rank_hinge_loss
+
 
 class BasicModel(object):
 
@@ -20,6 +24,17 @@ class BasicModel(object):
   def build(self, *args, **kwargs):
     pass
 
+  @staticmethod
+  def _step_decay(epoch, initial_lr):
+    initial_lrate = initial_lr
+    drop = 0.9
+    epochs_drop = 25.0
+    lrate = initial_lrate * math.pow(drop, math.floor((1 + epoch) / epochs_drop))
+    if lrate > 0.00001:
+      return lrate
+    else:
+      return 0.00001
+
   def train(self, model, pair_generator, fold, output_file, use_nprf=False):
     '''Driver function for training
 
@@ -27,20 +42,31 @@ class BasicModel(object):
       model: a keras Model
       pair_generator: a instantiated pair generator
       fold: which fold to run. partitions will be automatically rotated.
-      output_file: temporary file for valiation
+      output_file: temporary file for validation
       use_nprf: whether to use nprf
 
     Returns:
 
     '''
+
     # set tensorflow not to use the full GPU memory
-    session = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
+    # session = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
+    initial_lrate = self.config.learning_rate
+    experiment = Experiment(api_key="PhzBYNpSC304fMjGUoU42dX9b",
+                            project_name="nprf-drmm", workspace="neural-ir", auto_param_logging=False)
+    experiment_params = {
+      "batch_size": self.config.batch_size,
+      "optimizer": self.config.optimizer,
+      "epochs": self.config.max_iteration,
+      "initial_learning_rate": initial_lrate
+    }
+    experiment.log_multiple_params(experiment_params)
 
     # qid list config
     qid_list = deque(self.config.qid_list)
     rotate = fold - 1
     map(qid_list.rotate(rotate), qid_list)
-    #train_qid_list, valid_qid_list, test_qid_list = qid_list[0].tolist() + qid_list[1].tolist() + qid_list[2].tolist(), qid_list[3].tolist(), qid_list[4].tolist()
+
     train_qid_list, valid_qid_list, test_qid_list = qid_list[0] + qid_list[1] + qid_list[2], qid_list[3], qid_list[4]
     print(train_qid_list, valid_qid_list, test_qid_list)
     relevance_dict = load_pickle(self.config.relevance_dict_path)
@@ -54,7 +80,11 @@ class BasicModel(object):
     batch_logger = NBatchLogger(50)
     batch_losses = []
     met = [[], [], [], [], [], []]
+
     iteration = -1
+    best_valid_map = 0.0
+    new_lrate = initial_lrate
+
     for i in range(self.config.nb_epoch):
       print ("Epoch " + str(i))
 
@@ -63,6 +93,9 @@ class BasicModel(object):
       train_generator = pair_generator.generate_pair_batch(train_qid_list, self.config.pair_sample_size)
       for j in range(nb_batch / 100):
         iteration += 1
+        new_lrate = self._step_decay(iteration, initial_lrate)
+        K.set_value(model.optimizer.lr, new_lrate)
+
         history = model.fit_generator(generator=train_generator,
                                       steps_per_epoch=100,  # nb_pair_train / self.config.batch_size,
                                       epochs=1,
@@ -71,7 +104,10 @@ class BasicModel(object):
                                       callbacks=[batch_logger],
                                       )
         batch_losses.append(batch_logger.losses)
-        print("[Iter {0}]\tLoss: {1}".format(iteration, history.history['loss']))
+        print("[Iter {0}]\tLoss: {1}\tlr: {2}".format(iteration, history.history['loss'][0], new_lrate))
+        experiment.log_parameter("curr_epoch", iteration+1, step=(iteration + 1))
+        experiment.log_parameter("curr_lr", new_lrate, step=(iteration + 1))
+        experiment.log_metric("curr_loss", history.history['loss'][0], step=(iteration + 1))
 
         kwargs = {'model': model,
                   'relevance_dict': relevance_dict,
@@ -91,6 +127,15 @@ class BasicModel(object):
         met[1].append(valid_met[1])
         met[2].append(valid_met[2])
 
+        with experiment.validate():
+          experiment.log_metric("map", valid_met[0], step=(iteration + 1))
+          experiment.log_metric("p@20", valid_met[1], step=(iteration + 1))
+          experiment.log_metric("ndcg@20", valid_met[2], step=(iteration + 1))
+
+        if valid_met[0] > best_valid_map:
+          model.save_weights(os.path.join(self.config.save_path, "fold{0}.h5".format(fold)))
+          best_valid_map = valid_met[0]
+
         kwargs['output_file'] = os.path.join(self.config.result_path, "fold{0}.iter{1}.res".format(fold, iteration))
         # test_met = eval_partial(qid_list=test_qid_list)
         test_met = self.eval_by_qid_list(*test_params, **kwargs)
@@ -99,6 +144,12 @@ class BasicModel(object):
         met[3].append(test_met[0])
         met[4].append(test_met[1])
         met[5].append(test_met[2])
+
+        with experiment.test():
+          experiment.log_metric("map", test_met[0], step=(iteration + 1))
+          experiment.log_metric("p@20", test_met[1], step=(iteration + 1))
+          experiment.log_metric("ndcg@20", test_met[2], step=(iteration + 1))
+
       print("[Attention]\t\tCurrent best iteration {0}\n".format(met[0].index(max(met[0]))))
       if iteration > self.config.max_iteration:
         break

@@ -1,11 +1,15 @@
+from comet_ml import Experiment
 
 import time
-import keras
 import logging
 import multiprocessing
 import  numpy as np
 import cPickle as pickle
 import tensorflow as tf
+from keras.backend.tensorflow_backend import set_session
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True  # set tensorflow not to use the full GPU memory
+set_session(tf.Session(config=config))
 
 from functools import partial
 from contextlib import contextmanager
@@ -18,7 +22,7 @@ from keras import optimizers
 from keras import regularizers
 from keras import backend as K
 from keras.callbacks import Callback, LearningRateScheduler
-from keras.backend.tensorflow_backend import set_session
+import keras
 
 import os
 import sys
@@ -33,7 +37,6 @@ from result import Result
 from nprf_drmm_pair_generator import NPRFDRMMPairGenerator
 from nprf_drmm_config import NPRFDRMMConfig
 from rank_losses import rank_hinge_loss
-
 
 
 class NPRFDRMM(BasicModel):
